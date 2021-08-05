@@ -12,14 +12,14 @@ import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
-import android.os.Environment
+import android.os.FileUtils
 import android.os.Handler
 import android.util.DisplayMetrics
 import android.util.Log
 import android.widget.Toast
 import androidx.annotation.RequiresApi
 import com.blankj.utilcode.constant.PermissionConstants
-import com.blankj.utilcode.util.PermissionUtils
+import com.blankj.utilcode.util.*
 import java.io.File
 import java.nio.ByteBuffer
 
@@ -31,11 +31,11 @@ import java.nio.ByteBuffer
  */
 @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
 class ScreenRecordHelper @JvmOverloads constructor(
-        private var activity: Activity,
-        private val listener: OnVideoRecordListener?,
-        private var savePath: String = Environment.getExternalStorageDirectory().absolutePath + File.separator
-                + "DCIM" + File.separator + "Camera",
-        var saveName: String = "1_dengtacj_${System.currentTimeMillis()}"
+    private var activity: Activity,
+    private val listener: OnVideoRecordListener?,
+    private var savePath: String = PathUtils.getExternalAppDataPath() + File.separator
+            + "record",
+    var saveName: String = "1_dengtacj_${System.currentTimeMillis()}"
 ) {
 
     private val mediaProjectionManager by lazy { activity.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager }
@@ -51,33 +51,37 @@ class ScreenRecordHelper @JvmOverloads constructor(
         activity.windowManager.defaultDisplay.getMetrics(displayMetrics)
     }
 
+
     fun startRecord() {
         if (mediaProjectionManager == null) {
-            Log.d(TAG, "mediaProjectionManager == null，当前手机暂不支持录屏")
-            showToast(R.string.phone_not_support_screen_record)
+            showToast("mediaProjectionManager == null，当前手机暂不支持录屏")
             return
         }
         PermissionUtils.permission(PermissionConstants.STORAGE, PermissionConstants.MICROPHONE)
-                .callback(object : PermissionUtils.SimpleCallback {
-                    override fun onGranted() {
-                        Log.d(TAG, "start record")
-                        mediaProjectionManager?.apply {
-                            listener?.onBeforeRecord()
-                            val intent = this.createScreenCaptureIntent()
-                            if (activity.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) != null) {
-                                activity.startActivityForResult(intent, REQUEST_CODE)
-                            } else {
-                                showToast(R.string.phone_not_support_screen_record)
-                            }
+            .callback(object : PermissionUtils.SimpleCallback {
+                override fun onGranted() {
+                    Log.d(TAG, "start record")
+                    mediaProjectionManager?.apply {
+                        listener?.onBeforeRecord()
+                        val intent = this.createScreenCaptureIntent()
+                        if (activity.packageManager.resolveActivity(
+                                intent,
+                                PackageManager.MATCH_DEFAULT_ONLY
+                            ) != null
+                        ) {
+                            activity.startActivityForResult(intent, REQUEST_CODE)
+                        } else {
+                            showToast("createScreenCaptureIntent is null")
                         }
-
                     }
 
-                    override fun onDenied() {
-                        showToast(R.string.permission_denied)
-                    }
-                })
-                .request()
+                }
+
+                override fun onDenied() {
+                    showToast(R.string.permission_denied)
+                }
+            })
+            .request()
     }
 
     @RequiresApi(Build.VERSION_CODES.N)
@@ -93,22 +97,29 @@ class ScreenRecordHelper @JvmOverloads constructor(
     fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent) {
         if (requestCode == REQUEST_CODE) {
             if (resultCode == Activity.RESULT_OK) {
-                mediaProjection = mediaProjectionManager!!.getMediaProjection(resultCode, data)
-                // 实测，部分手机上录制视频的时候会有弹窗的出现
-                Handler().postDelayed({
-                    if (initRecorder()) {
-                        isRecording = true
-                        mediaRecorder?.start()
-                        listener?.onStartRecord()
-                    } else {
-                        showToast(R.string.phone_not_support_screen_record)
-
-                    }
-                }, 150)
+                startRecordInternal(resultCode, data)
             } else {
-                showToast(R.string.phone_not_support_screen_record)
+                listener?.onRecordError("")
+                showToast("onActivityResult resultCode: $resultCode")
             }
         }
+    }
+
+    private fun startRecordInternal(resultCode: Int, data: Intent) {
+
+
+        mediaProjection = mediaProjectionManager!!.getMediaProjection(resultCode, data)
+        // 实测，部分手机上录制视频的时候会有弹窗的出现
+        Handler().postDelayed({
+            if (initRecorder()) {
+                isRecording = true
+                mediaRecorder?.start()
+                listener?.onStartRecord()
+            } else {
+                listener?.onRecordError("")
+                showToast("初始化失败")
+            }
+        }, 150)
     }
 
     fun cancelRecord() {
@@ -119,7 +130,19 @@ class ScreenRecordHelper @JvmOverloads constructor(
     }
 
     private fun showToast(resId: Int) {
-        Toast.makeText(activity.applicationContext, activity.applicationContext.getString(resId), Toast.LENGTH_SHORT).show()
+        Toast.makeText(
+            activity.applicationContext,
+            activity.applicationContext.getString(resId),
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+
+    private fun showToast(text: String) {
+        Toast.makeText(
+            activity.applicationContext,
+            text,
+            Toast.LENGTH_SHORT
+        ).show()
     }
 
     private fun stop() {
@@ -149,7 +172,11 @@ class ScreenRecordHelper @JvmOverloads constructor(
     /**
      * if you has parameters, the recordAudio will be invalid
      */
-    fun stopRecord(videoDuration: Long = 0, audioDuration: Long = 0, afdd: AssetFileDescriptor? = null) {
+    fun stopRecord(
+        videoDuration: Long = 0,
+        audioDuration: Long = 0,
+        afdd: AssetFileDescriptor? = null
+    ) {
         stop()
         if (audioDuration != 0L && afdd != null) {
             syntheticAudio(videoDuration, audioDuration, afdd)
@@ -175,13 +202,12 @@ class ScreenRecordHelper @JvmOverloads constructor(
 //            showToast(R.string.save_to_album_success)
         } else {
             newFile.delete()
-            showToast(R.string.phone_not_support_screen_record)
-            Log.d(TAG, activity.getString(R.string.record_faild))
+            showToast(activity.getString(R.string.record_faild))
         }
     }
 
     private fun initRecorder(): Boolean {
-        Log.d(TAG, "initRecorder")
+        Log.d(TAG, "initRecorder ${displayMetrics.widthPixels} ${displayMetrics.heightPixels} ")
         var result = true
         val f = File(savePath)
         if (!f.exists()) {
@@ -194,8 +220,8 @@ class ScreenRecordHelper @JvmOverloads constructor(
             }
         }
         mediaRecorder = MediaRecorder()
-        val width = Math.min(displayMetrics.widthPixels, 1080)
-        val height = Math.min(displayMetrics.heightPixels, 1920)
+        val width = Math.max(displayMetrics.widthPixels, 1080)
+        val height = Math.max(displayMetrics.heightPixels, 1920)
 
         mediaRecorder?.apply {
             if (recordAudio) {
@@ -204,7 +230,8 @@ class ScreenRecordHelper @JvmOverloads constructor(
             setVideoSource(MediaRecorder.VideoSource.SURFACE)
             setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             setVideoEncoder(MediaRecorder.VideoEncoder.H264)
-            if (recordAudio){
+            if (recordAudio) {
+                //Call this after setOutputFormat() but before prepare().
                 setAudioEncoder(MediaRecorder.AudioEncoder.HE_AAC)
                 setAudioChannels(2)
                 setAudioSamplingRate(96000)
@@ -216,8 +243,10 @@ class ScreenRecordHelper @JvmOverloads constructor(
             setVideoFrameRate(VIDEO_FRAME_RATE)
             try {
                 prepare()
-                virtualDisplay = mediaProjection?.createVirtualDisplay("MainScreen", width, height, displayMetrics.densityDpi,
-                        DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, surface, null, null)
+                virtualDisplay = mediaProjection?.createVirtualDisplay(
+                    "MainScreen", width, height, displayMetrics.densityDpi,
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, surface, null, null
+                )
                 Log.d(TAG, "initRecorder 成功")
             } catch (e: Exception) {
                 Log.e(TAG, "IllegalStateException preparing MediaRecorder: ${e.message}")
@@ -241,7 +270,11 @@ class ScreenRecordHelper @JvmOverloads constructor(
     /**
      * https://stackoverflow.com/questions/31572067/android-how-to-mux-audio-file-and-video-file
      */
-    private fun syntheticAudio(audioDuration: Long, videoDuration: Long, afdd: AssetFileDescriptor) {
+    private fun syntheticAudio(
+        audioDuration: Long,
+        videoDuration: Long,
+        afdd: AssetFileDescriptor
+    ) {
         Log.d(TAG, "start syntheticAudio")
         val newFile = File(savePath, "$saveName.mp4")
         if (newFile.exists()) {
@@ -253,9 +286,14 @@ class ScreenRecordHelper @JvmOverloads constructor(
             videoExtractor.setDataSource(saveFile!!.absolutePath)
             val audioExtractor = MediaExtractor()
             afdd.apply {
-                audioExtractor.setDataSource(fileDescriptor, startOffset, length * videoDuration / audioDuration)
+                audioExtractor.setDataSource(
+                    fileDescriptor,
+                    startOffset,
+                    length * videoDuration / audioDuration
+                )
             }
-            val muxer = MediaMuxer(newFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            val muxer =
+                MediaMuxer(newFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
             videoExtractor.selectTrack(0)
             val videoFormat = videoExtractor.getTrackFormat(0)
             val videoTrack = muxer.addTrack(videoFormat)
@@ -343,6 +381,7 @@ class ScreenRecordHelper @JvmOverloads constructor(
         private const val VIDEO_FRAME_RATE = 30
         private const val REQUEST_CODE = 1024
         private const val TAG = "ScreenRecordHelper"
+        private const val canRecord = "canRecord"
     }
 
     interface OnVideoRecordListener {
@@ -365,5 +404,7 @@ class ScreenRecordHelper @JvmOverloads constructor(
          * 结束录制
          */
         fun onEndRecord()
+
+        fun onRecordError(string: String)
     }
 }

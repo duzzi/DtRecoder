@@ -9,8 +9,7 @@
         android:id="@+id/ll_parent"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:orientation="vertical"
-        tools:context=".MainActivity">
+        android:orientation="vertical">
 
         <com.dengtacj.recorder.view.DtWebView
             android:id="@+id/webView"
@@ -19,6 +18,7 @@
     </LinearLayout>
 
     <Button
+        android:visibility="gone"
         android:id="@+id/button"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"

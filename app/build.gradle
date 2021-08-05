@@ -1,7 +1,18 @@
+import java.text.SimpleDateFormat
+
 apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
 apply plugin: 'kotlin-android-extensions'
 
+
+static String getFormatDate() {
+    def df = new SimpleDateFormat("MMddHH")
+    df.setTimeZone(TimeZone.getTimeZone("Asia/Shanghai"))
+    return df.format(new Date())
+}
+static int getVersionCode() {
+    return Integer.parseInt("100" + getFormatDate())
+}
 android {
     compileSdkVersion 30
     buildToolsVersion "30.0.3"
@@ -11,16 +22,51 @@ android {
         minSdkVersion 21
         //noinspection ExpiredTargetSdkVersion
         targetSdkVersion 28
-        versionCode 1
-        versionName "1.0"
+        versionCode getVersionCode()
+        versionName "1.0.0"
+    }
+
+    signingConfigs {
+        release {
+            storeFile file("keystore.jks")
+            storePassword "123456"
+            keyAlias "dengtacj"
+            keyPassword "123456"
+        }
     }
 
     buildTypes {
-        release {
+        debug {
+            debuggable true
             minifyEnabled false
+            proguardFile 'proguard-project.txt'
+//            signingConfig signingConfigs.release
+        }
+
+        release {
+            debuggable true
+            minifyEnabled false
+            signingConfig signingConfigs.release
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
+
+        applicationVariants.all { variant ->
+            def builtType = variant.buildType.name
+            variant.outputs.all { output ->
+                def versionName = variant.versionName
+                def versionCode = variant.versionCode
+                def buildInfo = "dtrecorder-${versionName}-${versionCode}-${builtType}"
+                println buildInfo
+                if (!(builtType == "debug")) {
+                    outputFileName = "${buildInfo}.apk"
+                } else {
+                    println "${buildInfo} finally"
+                }
+            }
+        }
+
     }
+
 }
 
 dependencies {

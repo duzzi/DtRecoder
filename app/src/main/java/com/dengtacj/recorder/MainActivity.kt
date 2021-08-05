@@ -8,14 +8,13 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.view.View
 import android.widget.Button
 import androidx.appcompat.app.AppCompatActivity
 import com.blankj.utilcode.constant.PermissionConstants
 import com.blankj.utilcode.util.*
 import com.dengtacj.recorder.view.DtWebView
-import java.text.SimpleDateFormat
-import java.util.*
+import java.util.concurrent.Executor
+import java.util.concurrent.Executors
 import kotlin.system.exitProcess
 
 
@@ -33,12 +32,15 @@ class MainActivity : AppCompatActivity(), ReceiverCallback {
     private lateinit var button: Button
     private lateinit var webView: DtWebView
 
-//    private var url = "http://192.168.11.144:8080/#/Home"
-//    private var url = "http://192.168.11.144:8080/#/MainFund"
-//    private var url = "http://192.168.11.144:8080/#/Forecast"
-//    private var url = "http://192.168.11.144:8080/#/Template4"
-//    private var url = "http://192.168.11.144:8080/#/Template5"
+    private val host = "http://192.168.11.109:8080"
+//    private var url = "$host/#/Home"
+
+    //    private var url = "$host/#/MainFund"
+//    private var url = "$host/#/Forecast"
+//    private var url = "$host/#/Template4"
+//    private var url = "$host/#/Template5"
     private var url = "https://m.jd.com"
+    val defaultExecutor: Executor = Executors.newCachedThreadPool()
 
     companion object {
         const val key_duration = "duration"
@@ -52,21 +54,42 @@ class MainActivity : AppCompatActivity(), ReceiverCallback {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ScreenUtils.setFullScreen(this)
+//adb shell am start -n com.dengtacj.recorder/com.dengtacj.recorder.MainActivity -ei duration 5
 
-        //adb shell am start -n com.dengtacj.recorder/com.dengtacj.recorder.MainActivity -d xxxxxxxx
-        //adb shell am start -n com.dengtacj.recorder/com.dengtacj.recorder.MainActivity -ei duration 5
-        //adb shell am start -n com.dengtacj.recorder/com.dengtacj.recorder.MainActivity
-        //adb shell am broadcast -a "com.dengtacj.recorder.start"
-        //adb shell am broadcast -a "com.dengtacj.recorder.stop"
-        //adb shell am force-stop com.dengtacj.recorder
+
+
+//强制关闭
+//adb shell am force-stop com.dengtacj.recorder
+//启动页面
+//adb shell am start -n com.dengtacj.recorder/com.dengtacj.recorder.MainActivity -d https://m.jd.com
+//开始录制，毫秒
+//adb shell am broadcast -a "com.dengtacj.recorder.start" --ei duration 8500
+// 点击弹窗上的立即开始按钮
+//adb shell input tap 790 2222
+//手动停止录制
+//adb shell am broadcast -a "com.dengtacj.recorder.stop"
+//拷贝录屏视频
+//adb pull /sdcard/Android/data/com.dengtacj.recorder/record.mp4  d:\record\xxxxxx.mp4
         val startTime = System.currentTimeMillis()
         setContentView(R.layout.activity_main)
-        LogUtils.i("start cost ${System.currentTimeMillis()-startTime}")
+        deleteCache()
+        LogUtils.i("start cost ${System.currentTimeMillis() - startTime}")
         initData()
         initView()
         register()
         initPermission()
+    }
 
+    private fun deleteCache() {
+        defaultExecutor.execute {
+            val files = FileUtils.listFilesInDir(PathUtils.getExternalAppDataPath())
+            files.forEach {
+                if (it.name.contains("mp4")) {
+                    val delete = FileUtils.delete(it)
+                    LogUtils.v("fileName:${it.name} delete:$delete")
+                }
+            }
+        }
     }
 
     private fun initData() {
@@ -75,10 +98,6 @@ class MainActivity : AppCompatActivity(), ReceiverCallback {
         if (dataString.isNullOrEmpty().not()) {
             url = dataString!!
         }
-        duration = intent.getIntExtra("duration", -1)
-//        if (duration > 0) {
-//            startRecord(duration)
-//        }
     }
 
     private fun initPermission() {
@@ -111,8 +130,10 @@ class MainActivity : AppCompatActivity(), ReceiverCallback {
     private fun initView() {
         button = findViewById(R.id.button)
         webView = findViewById(R.id.webView)
-        webView.post{ webView.loadUrl(url) }
-
+        webView.post {
+            LogUtils.d("loadUrl: $url")
+            webView.loadUrl(url)
+        }
 
         button.setOnClickListener {
             val recording = screenRecordHelper?.isRecording
@@ -126,6 +147,7 @@ class MainActivity : AppCompatActivity(), ReceiverCallback {
     }
 
     private fun stopRecord() {
+        handler.removeCallbacksAndMessages(null)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             screenRecordHelper?.apply {
                 if (isRecording) {
@@ -133,15 +155,16 @@ class MainActivity : AppCompatActivity(), ReceiverCallback {
                 }
             }
         }
-        button.isEnabled = true
-        button.text = "start"
+        resetButton()
     }
 
     val handler = Handler(Looper.getMainLooper())
     private fun startRecord(duration: Int) {
         button.text = "stop"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            val name = SimpleDateFormat("yyyy-MM-dd hh:mm:ss", Locale.CHINA).format(Date())
+//            val name = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.CHINA).format(Date())
+//            val dir = SimpleDateFormat("yyyyMMdd", Locale.CHINA).format(Date())
+            val name = "record"
             if (screenRecordHelper == null) {
                 LogUtils.d("startRecord $name")
                 screenRecordHelper =
@@ -159,22 +182,25 @@ class MainActivity : AppCompatActivity(), ReceiverCallback {
                             button.isEnabled = true
                             LogUtils.d("onStartRecord() called")
                             if (duration > 0) {
-                                handler.postDelayed({ stopRecord() }, duration * 1000L)
+                                handler.postDelayed({ stopRecord() }, duration * 1L)
                             }
                         }
 
                         override fun onCancelRecord() {
-                            button.isEnabled = true
+                            resetButton()
                             LogUtils.d("onCancelRecord() called")
                         }
 
                         override fun onEndRecord() {
-                            button.isEnabled = true
-                            button.visibility = View.VISIBLE
+                            resetButton()
                             LogUtils.d("onEndRecord() called")
                         }
 
-                    }, PathUtils.getInternalAppDataPath() + "/1_dengtacj", saveName = name)
+                        override fun onRecordError(string: String) {
+                            resetButton()
+                        }
+
+                    }, PathUtils.getExternalAppDataPath(), saveName = name)
             }
             screenRecordHelper?.apply {
                 if (!isRecording) {
@@ -185,8 +211,13 @@ class MainActivity : AppCompatActivity(), ReceiverCallback {
                 }
             }
         } else {
-            ToastUtils.showShort(R.string.phone_not_support_screen_record)
+            ToastUtils.showShort("Android 5.1以下不支持录屏")
         }
+    }
+
+    private fun resetButton() {
+        button.isEnabled = true
+        button.text = "start"
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -227,8 +258,11 @@ class MainActivity : AppCompatActivity(), ReceiverCallback {
         }
     }
 
-    override fun onReceive(action: String?) {
+    override fun onReceive(intent: Intent) {
+        val action = intent.action
         if (action_start == action) {
+            duration = intent.getIntExtra(key_duration, -1)
+            LogUtils.i("duration:$duration")
             val recording = screenRecordHelper?.isRecording
             if (recording != null && recording) return
             startRecord(duration)
@@ -239,7 +273,11 @@ class MainActivity : AppCompatActivity(), ReceiverCallback {
 
     override fun onBackPressed() {
         super.onBackPressed()
-        exitProcess(0)
+        if (webView.canGoBack()) {
+            webView.goBack()
+        } else {
+            exitProcess(0)
+        }
     }
 
 }
@@ -254,10 +292,10 @@ class RecordBroadcastReceiver :
 
     override fun onReceive(context: Context?, intent: Intent) {
         LogUtils.d("onReceive() $context, intent = ${intent.action}")
-        intent.action.let { receiverCallback?.onReceive(it) }
+        intent.action.let { receiverCallback?.onReceive(intent) }
     }
 }
 
 interface ReceiverCallback {
-    fun onReceive(action: String?)
+    fun onReceive(intent: Intent)
 }
